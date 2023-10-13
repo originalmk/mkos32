@@ -1,0 +1,5 @@
+boot.o
+kernel.o
+isodir/
+mkos.bin
+mkos.iso
