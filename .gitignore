@@ -3,3 +3,4 @@ kernel.o
 isodir/
 mkos.bin
 mkos.iso
+bx_enh_dbg.ini
