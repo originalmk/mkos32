@@ -16,8 +16,6 @@
  * podać ich odwrotność. */
 .set CHECKSUM, -(MAGIC + FLAGS)
 
-// TODO: Dopisać czas do dziennika
-
 /* Faktyczny nagłówek multiboot z wykorzystaniem powyższych wartości */
 .section .multiboot
 .align 4
@@ -36,6 +34,11 @@ stack_bottom:
 .skip 16834
 stack_top:
 
+.section .data
+/* 23, bo będą 3 deskryptory po 8 bajtów, a przekazujemy wielkość - 1*/
+gdtr:	.word 23
+		.long 0
+
 /*
 	Oznaczenie startu, tu zaczyna się kod kernela!
 */
@@ -44,7 +47,15 @@ stack_top:
 .type _start, @function
 _start:
 /* Tutaj podobno jest tryb chroniony już, jednak zastanawia czy faktycznie
-bootloader ustawia za nas segmentacje pamięci? */
+ * bootloader ustawia za nas segmentacje pamięci?
+ * EDIT: Ustawia, ale pod własne potrzeby, więc i tak trzeba zmienić
+ * Ustawię zatem najprostszy model segmentacji */
+
+// 1. Pusty (null) deskryptor
+mov $0, %eax
+movq $0, (%eax)
+// 2. Deskryptor kodu jądra
+
 
 /* Ustawienie ESP na wierzchołek stosu */
 mov $stack_top, %esp
