@@ -35,9 +35,11 @@ stack_bottom:
 stack_top:
 
 .section .data
-/* 23, bo będą 3 deskryptory po 8 bajtów, a przekazujemy wielkość - 1*/
+/* 31, bo będą 4 deskryptory po 8 bajtów, a przekazujemy wielkość - 1*/
+// TODO
 gdtr:	.word 23
-		.long 0
+/* Na 4 MiB daję bazę dla GDT, czyli tam gdzie zaczynają się dane kernela */
+gdtb:	.long 0x400000
 
 /*
 	Oznaczenie startu, tu zaczyna się kod kernela!
@@ -51,16 +53,39 @@ _start:
  * EDIT: Ustawia, ale pod własne potrzeby, więc i tak trzeba zmienić
  * Ustawię zatem najprostszy model segmentacji */
 
-// 1. Pusty (null) deskryptor
-mov $0, %eax
-movq $0, (%eax)
-// 2. Deskryptor kodu jądra
+// Domyślne ustawienia z GRUB-a są takie, że pomijają segmentację!
+// Dodam w ramach segmentu danych kernela, czyli u mnie 4-8 MiB
 
+mov gdtb, %eax
+// 1. Pusty (null) deskryptor
+movl $0, (%eax)
+movl $0, 4(%eax)
+// 2. Deskryptor kodu jądra
+movl $0x000003FF, 8(%eax)
+movl $0x00c09800, 12(%eax)
+// 3. Deskryptor danych jądra
+movl $0x000003FF, 16(%eax)
+movl $0x00C09240, 20(%eax)
+// 4. Deskryptor kodu użytkownika
+// 6. Load GDT
+lgdt (gdtr)
+// 7. Refresh registers
+mov %cs, 8(%eax)
+mov %ds, 16(%eax)
+mov %es, 16(%eax)
+mov %fs, 16(%eax)
+mov %gs, 16(%eax)
+mov %ss, 16(%eax)
+
+// Wpisywane jest i tak pod %ds:64
+movb $69, (64)
 
 /* Ustawienie ESP na wierzchołek stosu */
 mov $stack_top, %esp
 
 /* Tutaj jakieś ustawienia inicjalizacyjne trzeba zrobić normalnie */
+//mov $69, %esi
+//mov $_start, %edi
 
 /* Wywołanie kernela */
 call kernel_main
