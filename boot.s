@@ -51,17 +51,6 @@ mov $stack_top, %esp
 /* Wywołanie kernela */
 call kernel_main
 
-mov $0x10, %ax
-mov %ax, %ds
-mov %ax, %es
-mov %ax, %fs
-mov %ax, %gs
-mov %ax, %ss
-jmp $0x08,$cs_refresh
-cs_refresh:
-mov $0x4000, %esp
-push $5
-
 /* Wieczne oczekiwanie po zakończeniu kodu kernela */
 	cli
 1:	hlt

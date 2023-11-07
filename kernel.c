@@ -187,12 +187,13 @@ void terminal_writenumpad(uint64_t number, int base, int pad_length)
 			number = rest;
 		}
 	}
-	
+
 	// Write pad_length - size of zeros
 	// If padding won't be needed (number is longer than pad_legnth)
 	// then loop won't run at all
-	while (pad_length > size) {
-		numChars[31 - size++] = digits[0];	
+	while (pad_length > size)
+	{
+		numChars[31 - size++] = digits[0];
 	}
 
 	terminal_write(numChars + (32 - size), size);
@@ -355,7 +356,7 @@ void apply_table(struct gdt_table table)
 		*dest_address = entry_encoded;
 	}
 
-	__asm__("lgdt (%0)" : : "r" (&table));
+ __asm__("lgdt (%0)": :"r"(&table));
 }
 
 void print_texts()
@@ -381,8 +382,8 @@ void print_texts()
 
 	size_t start_point;
 
-	__asm__("mov $_start, %%eax": : :"eax");
-	__asm__("mov %%eax, %0;": "=r"(start_point):);
+ __asm__("mov $_start, %%eax": : :"eax");
+ __asm__("mov %%eax, %0;": "=r"(start_point):);
 
 	terminal_writestring("\n\nPoczatek kernela:\n");
 	terminal_writenum(start_point, 10);
@@ -396,40 +397,36 @@ void print_texts()
 void gdt_setup()
 {
 	struct gdt_entry kernel_code_entry =
-		gdt_entry_create(0, 0x400, KERNEL_SEGMENT, CODE_SEGMENT);
+	    gdt_entry_create(0x0, 0x100000, KERNEL_SEGMENT, CODE_SEGMENT);
 	struct gdt_entry kernel_data_entry =
-		gdt_entry_create(0x400, 0x400, KERNEL_SEGMENT, DATA_SEGMENT); 
+	    gdt_entry_create(0x0, 0x100000, KERNEL_SEGMENT, DATA_SEGMENT);
 	struct gdt_entry user_code_entry =
-		gdt_entry_create(0x800, 0x400, USER_SEGMENT, CODE_SEGMENT);
+	    gdt_entry_create(0x0, 0x100000, USER_SEGMENT, CODE_SEGMENT);
 	struct gdt_entry user_data_entry =
-		gdt_entry_create(0xC00, 0x400, USER_SEGMENT, DATA_SEGMENT);
+	    gdt_entry_create(0x0, 0x100000, USER_SEGMENT, DATA_SEGMENT);
 
 	struct gdt_table gdt_table;
-	gdt_table.size_in_bytes = 39; 
-	gdt_table.dest_pointer = (uint64_t*)0x400000; 
+	gdt_table.size_in_bytes = 39;
+	gdt_table.dest_pointer = (uint64_t *) 0x400000;
 	gdt_table.entries[0] = kernel_code_entry;
 	gdt_table.entries[1] = kernel_data_entry;
 	gdt_table.entries[2] = user_code_entry;
 	gdt_table.entries[3] = user_data_entry;
-	
+
 	apply_table(gdt_table);
 	terminal_writestring("GDT table applied\n");
 
 	__asm__ volatile(
-		"mov $stack_bottom, %%esi;"
-		"mov $0x500000, %%edi;"
-		"mov $16384, %%ecx;"
-		"cld;"
-		"rep movsb;"
-		:
-		:
-		:
-		"esi","edi","ecx"
+		"mov $0x10, %ax;"
+		"mov %ax, %ds;"
+		"mov %ax, %es;"
+		"mov %ax, %fs;"
+		"mov %ax, %gs;"
+		"mov %ax, %ss;"
+		"jmp $0x08,$csrefresh;"
 	);
 
-	__asm__(
-		"xchg %bx, %bx"
-	);
+	__asm__ volatile("csrefresh:");
 }
 
 void kernel_main(void)
