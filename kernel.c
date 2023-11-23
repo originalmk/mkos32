@@ -1,432 +1,134 @@
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * Check if the compiler thinks you are targeting the wrong operating
- * system. 
- */
-#if defined(__linux__)
-#error "You are not using a cross-compiler, you will most certainly run into trouble"
-#endif
+#include "gdt.h"
+#include "print.h"
+#include "idt.h"
 
-/*
- * This tutorial will only work for the 32-bit ix86 targets. 
- */
-#if !defined(__i386__)
-#error "This tutorial needs to be compiled with a ix86-elf compiler"
-#endif
+/* Taken from OSDEV WIKI */
+#define PIC1		0x20		/* IO base address for master PIC */
+#define PIC2		0xA0		/* IO base address for slave PIC */
+#define PIC1_COMMAND	PIC1
+#define PIC1_DATA	(PIC1+1)
+#define PIC2_COMMAND	PIC2
+#define PIC2_DATA	(PIC2+1)
 
-/*
- * Hardware text mode color constants. 
- */
-enum vga_color {
-	VGA_COLOR_BLACK = 0,
-	VGA_COLOR_BLUE = 1,
-	VGA_COLOR_GREEN = 2,
-	VGA_COLOR_CYAN = 3,
-	VGA_COLOR_RED = 4,
-	VGA_COLOR_MAGENTA = 5,
-	VGA_COLOR_BROWN = 6,
-	VGA_COLOR_LIGHT_GREY = 7,
-	VGA_COLOR_DARK_GREY = 8,
-	VGA_COLOR_LIGHT_BLUE = 9,
-	VGA_COLOR_LIGHT_GREEN = 10,
-	VGA_COLOR_LIGHT_CYAN = 11,
-	VGA_COLOR_LIGHT_RED = 12,
-	VGA_COLOR_LIGHT_MAGENTA = 13,
-	VGA_COLOR_LIGHT_BROWN = 14,
-	VGA_COLOR_WHITE = 15,
-};
+#define ICW1_ICW4	0x01		/* Indicates that ICW4 will be present */
+#define ICW1_SINGLE	0x02		/* Single (cascade) mode */
+#define ICW1_INTERVAL4	0x04		/* Call address interval 4 (8) */
+#define ICW1_LEVEL	0x08		/* Level triggered (edge) mode */
+#define ICW1_INIT	0x10		/* Initialization - required! */
+ 
+#define ICW4_8086	0x01		/* 8086/88 (MCS-80/85) mode */
+#define ICW4_AUTO	0x02		/* Auto (normal) EOI */
+#define ICW4_BUF_SLAVE	0x08		/* Buffered mode/slave */
+#define ICW4_BUF_MASTER	0x0C		/* Buffered mode/master */
+#define ICW4_SFNM	0x10		/* Special fully nested (not) */
+/* End of taken */
 
-static inline uint8_t vga_entry_color(enum vga_color fg, enum vga_color bg)
+void breakpoint()
 {
-	return fg | bg << 4;
+	__asm__("xchg %bx, %bx");
 }
 
-static inline uint16_t vga_entry(unsigned char uc, uint8_t color)
+void set_interrupts(bool enabled)
 {
-	return (uint16_t) uc | (uint16_t) color << 8;
-}
-
-size_t strlen(const char *str)
-{
-	size_t len = 0;
-	while (str[len])
-		len++;
-	return len;
-}
-
-static const size_t VGA_WIDTH = 80;
-static const size_t VGA_HEIGHT = 25;
-
-size_t terminal_row;
-size_t terminal_column;
-uint8_t terminal_color;
-uint16_t *terminal_buffer;
-
-void terminal_initialize(void)
-{
-	terminal_row = 0;
-	terminal_column = 0;
-	terminal_color = vga_entry_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-	terminal_buffer = (uint16_t *) 0xB8000;
-	for (size_t y = 0; y < VGA_HEIGHT; y++)
+	if (enabled)
 	{
-		for (size_t x = 0; x < VGA_WIDTH; x++)
-		{
-			const size_t index = y * VGA_WIDTH + x;
-			terminal_buffer[index] = vga_entry(' ', terminal_color);
-		}
-	}
-}
-
-void terminal_setcolor(uint8_t color)
-{
-	terminal_color = color;
-}
-
-void terminal_putentryat(char c, uint8_t color, size_t x, size_t y)
-{
-	const size_t index = y * VGA_WIDTH + x;
-	terminal_buffer[index] = vga_entry(c, color);
-}
-
-void terminal_putchar(char c)
-{
-	terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
-	if (++terminal_column == VGA_WIDTH)
-	{
-		terminal_column = 0;
-		if (++terminal_row == VGA_HEIGHT)
-		{
-			terminal_row--;
-			// Fixed at last row now
-			// Now we need to move from second line to end to the start
-			for (size_t y = 1; y < VGA_HEIGHT; y++)
-			{
-				for (size_t x = 0; x < VGA_WIDTH; x++)
-				{
-					const size_t src_index =
-					    y * VGA_WIDTH + x;
-					char toCopy =
-					    terminal_buffer[src_index];
-					terminal_putentryat(toCopy,
-							    terminal_color,
-							    x, y - 1);
-				}
-			}
-
-			for (size_t x = 0; x < VGA_WIDTH; x++)
-			{
-				terminal_putentryat(' ', terminal_color,
-						    x, VGA_HEIGHT - 1);
-			}
-		}
-	}
-	// Write branding
-	uint8_t prevColor = terminal_color;
-
-	terminal_color =
-	    vga_entry_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_MAGENTA);
-	terminal_putentryat('M', terminal_color, VGA_WIDTH - 4, 0);
-	terminal_color = vga_entry_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_CYAN);
-	terminal_putentryat('K', terminal_color, VGA_WIDTH - 3, 0);
-	terminal_color = vga_entry_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_BLUE);
-	terminal_putentryat('O', terminal_color, VGA_WIDTH - 2, 0);
-	terminal_color =
-	    vga_entry_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_GREEN);
-	terminal_putentryat('S', terminal_color, VGA_WIDTH - 1, 0);
-
-	terminal_color = prevColor;
-}
-
-void terminal_newline()
-{
-	for (size_t x = terminal_column; x < VGA_WIDTH; x++)
-	{
-		terminal_putchar(' ');
-	}
-}
-
-void terminal_write(const char *data, size_t size)
-{
-	for (size_t i = 0; i < size; i++)
-	{
-		if (data[i] == '\n')
-		{
-			terminal_newline();
-		}
-		else
-		{
-			terminal_putchar(data[i]);
-		}
-	}
-}
-
-// Pad length is what number length should be, including padding
-void terminal_writenumpad(uint64_t number, int base, int pad_length)
-{
-	char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	int size = 0;
-	char numChars[32];
-
-	if (number == 0)
-	{
-		numChars[31] = '0';
-		size = 1;
+		__asm__ volatile("sti");
 	}
 	else
 	{
-		while (number != 0)
-		{
-			uint64_t rest = number / base;
-			uint64_t digit = number % base;
-
-			numChars[31 - size++] = digits[digit];
-			number = rest;
-		}
-	}
-
-	// Write pad_length - size of zeros
-	// If padding won't be needed (number is longer than pad_legnth)
-	// then loop won't run at all
-	while (pad_length > size)
-	{
-		numChars[31 - size++] = digits[0];
-	}
-
-	terminal_write(numChars + (32 - size), size);
+		__asm__ volatile("cli");
+	}	
 }
 
-void terminal_writenum(uint64_t number, int base)
+void outb(uint8_t port_number, uint8_t new_value)
 {
-	terminal_writenumpad(number, base, 0);
+	__asm__ volatile(
+		"outb %[new_value], %[port_number]"
+		:
+		:
+		[port_number] "d" ((unsigned short)port_number),
+		[new_value] "a" (new_value)
+	);	
 }
 
-void terminal_writestring(const char *data)
+uint8_t inb(uint8_t port_number)
 {
-	terminal_write(data, strlen(data));
-}
-
-void terminal_writegreeting()
-{
-	terminal_writestring("                              .-'''-.        \n");
-	terminal_writestring
-	    ("                             '   _    \\      \n");
-	terminal_writestring
-	    (" __  __   ___        .     /   /` '.   \\     \n");
-	terminal_writestring
-	    ("|  |/  `.'   `.    .'|    .   |     \\  '     \n");
-	terminal_writestring("|   .-.  .-.   ' .'  |    |   '      |  '    \n");
-	terminal_writestring
-	    ("|  |  |  |  |  |<    |    \\    \\     / /     \n");
-	terminal_writestring("|  |  |  |  |  | |   | ____`.   ` ..' / _    \n");
-	terminal_writestring
-	    ("|  |  |  |  |  | |   | \\ .'   '-...-'`.' |   \n");
-	terminal_writestring("|  |  |  |  |  | |   |/  .           .   | / \n");
-	terminal_writestring
-	    ("|__|  |__|  |__| |    /\\  \\        .'.'| |// \n");
-	terminal_writestring
-	    ("                 |   |  \\  \\     .'.'.-'  /  \n");
-	terminal_writestring
-	    ("                 '    \\  \\  \\    .'   \\_.'   \n");
-	terminal_writestring("                '------'  '---'              \n");
-}
-
-struct gdt_entry {
-	size_t base;
-	size_t limit;
-	bool is_present;
-	int permission_level;
-	int segment_type;
-	bool is_executable;
-	int direction_conforming;
-	int readable_writable;
-	bool was_accessed;
-	int granularity;
-	int segment_mode;
-	bool is_long_mode;
-};
-
-#define KERNEL_SEGMENT 0
-#define USER_SEGMENT 1
-#define CODE_SEGMENT 0
-#define DATA_SEGMENT 1
-
-struct gdt_entry gdt_entry_create(size_t start_address, size_t pages_size,
-				  int kernel_or_user, int code_or_data)
-{
-	struct gdt_entry new_entry;
-
-	new_entry.base = start_address;
-	new_entry.limit = pages_size - 1;
-	new_entry.is_present = true;
-
-	if (kernel_or_user == KERNEL_SEGMENT)
-	{
-		new_entry.permission_level = 0;
-	}
-	else
-	{
-		new_entry.permission_level = 3;
-	}
-
-	new_entry.segment_type = 1;
-	new_entry.is_executable = (code_or_data == CODE_SEGMENT);
-	new_entry.direction_conforming = 0;
-
-	if (code_or_data == CODE_SEGMENT)
-	{
-		new_entry.readable_writable = 0;
-	}
-	else
-	{
-		new_entry.readable_writable = 1;
-	}
-
-	new_entry.was_accessed = false;
-	new_entry.granularity = 1;
-	new_entry.segment_mode = 1;
-	new_entry.is_long_mode = false;
-
-	return new_entry;
-}
-
-// BB F L AA BBBBBB LLLL
-// AA = P DPL(2) S E DC RW A
-// F = G DB L -
-uint64_t gdt_entry_encode(struct gdt_entry entry)
-{
-	entry.base = entry.base << 12;
-
-	uint64_t gdt_encoded = 0;
-
-	// Insert base
-	gdt_encoded |= ((((uint64_t) entry.base) & 0xFF000000) << 32);
-	gdt_encoded |= ((((uint64_t) entry.base) & 0x00FFFFFF) << 16);
-
-	// Insert limit
-	gdt_encoded |= ((uint64_t) (entry.limit & 0xF0000) << 32);
-	gdt_encoded |= (entry.limit & 0x0FFFF);
-
-	// Prepare flags
-	uint64_t flags = 0;
-	flags |= (entry.granularity << 3);
-	flags |= (entry.segment_mode << 2);
-	flags |= (entry.is_long_mode << 1);
-
-	// Insert flags
-	gdt_encoded |= (flags << 52);
-
-	// Prepare access byte
-	uint64_t access_byte = 0;
-	access_byte |= (entry.is_present << 7);
-	access_byte |= (entry.permission_level << 5);
-	access_byte |= (entry.segment_type << 4);
-	access_byte |= (entry.is_executable << 3);
-	access_byte |= (entry.direction_conforming << 2);
-	access_byte |= (entry.readable_writable << 1);
-	access_byte |= entry.was_accessed;
-
-	// Insert access byte
-	gdt_encoded |= (access_byte << 40);
-
-	return gdt_encoded;
-}
-
-struct __attribute__((__packed__)) gdt_table
-{
-	uint16_t size_in_bytes;
-	uint64_t *dest_pointer;
-	struct gdt_entry entries[16];
-};
-
-void apply_table(struct gdt_table table)
-{
-	// Null entry added implicitly
-	uint64_t null_entry_encoded = 0;
-	*table.dest_pointer = null_entry_encoded;
-
-	int entries_count = (table.size_in_bytes + 1) / 8;
-	for (int i = 0; i < entries_count; i++)
-	{
-		uint64_t entry_encoded = gdt_entry_encode(table.entries[i]);
-		uint64_t *dest_address = table.dest_pointer + i + 1;
-		*dest_address = entry_encoded;
-	}
-
- __asm__("lgdt (%0)": :"r"(&table));
-}
-
-void print_texts()
-{
-	terminal_writestring("TEGO NIE POWINNO BYC WIDAC\n");
-	terminal_writestring
-	    ("Witam i pozdrawiam, MK\nTest wielolinijkowosci\n");
-	for (size_t i = 0; i < VGA_HEIGHT - 3; i++)
-	{
-		for (size_t j = 0; j < i; j++)
-		{
-			terminal_writestring("*");
-		}
-		if (i != VGA_HEIGHT - 3)
-			terminal_writestring("\n");
-	}
-	terminal_newline();
-	terminal_writenum(123456789, 10);
-	terminal_newline();
-	terminal_writenum(189, 16);
-	terminal_newline();
-	terminal_writegreeting();
-
-	size_t start_point;
-
- __asm__("mov $_start, %%eax": : :"eax");
- __asm__("mov %%eax, %0;": "=r"(start_point):);
-
-	terminal_writestring("\n\nPoczatek kernela:\n");
-	terminal_writenum(start_point, 10);
-	terminal_newline();
-
-	size_t human_readable = start_point / (1024 * 1024);
-	terminal_writenum(human_readable, 10);
-	terminal_writestring(" MiB\n");
-}
-
-void gdt_setup()
-{
-	struct gdt_entry kernel_code_entry =
-	    gdt_entry_create(0x0, 0x100000, KERNEL_SEGMENT, CODE_SEGMENT);
-	struct gdt_entry kernel_data_entry =
-	    gdt_entry_create(0x0, 0x100000, KERNEL_SEGMENT, DATA_SEGMENT);
-	struct gdt_entry user_code_entry =
-	    gdt_entry_create(0x0, 0x100000, USER_SEGMENT, CODE_SEGMENT);
-	struct gdt_entry user_data_entry =
-	    gdt_entry_create(0x0, 0x100000, USER_SEGMENT, DATA_SEGMENT);
-
-	struct gdt_table gdt_table;
-	gdt_table.size_in_bytes = 39;
-	gdt_table.dest_pointer = (uint64_t *) 0x400000;
-	gdt_table.entries[0] = kernel_code_entry;
-	gdt_table.entries[1] = kernel_data_entry;
-	gdt_table.entries[2] = user_code_entry;
-	gdt_table.entries[3] = user_data_entry;
-
-	apply_table(gdt_table);
-	terminal_writestring("GDT table applied\n");
+	uint8_t out_value;
 
 	__asm__ volatile(
-		"mov $0x10, %ax;"
-		"mov %ax, %ds;"
-		"mov %ax, %es;"
-		"mov %ax, %fs;"
-		"mov %ax, %gs;"
-		"mov %ax, %ss;"
-		"jmp $0x08,$csrefresh;"
+		"in %[port_number], %[out_value];"
+		:
+		[out_value] "=a" (out_value)
+		:
+		[port_number] "d" ((unsigned short)port_number)
 	);
 
-	__asm__ volatile("csrefresh:");
+	return out_value;
+}
+
+static inline void io_wait(void)
+{
+    outb(0x80, 0);
+}
+
+void PIC_remap(int offset1, int offset2)
+{
+	unsigned char a1, a2;
+ 
+	a1 = inb(PIC1_DATA);                        // save masks
+	a2 = inb(PIC2_DATA);
+ 
+	outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);  // starts the initialization sequence (in cascade mode)
+	io_wait();
+	outb(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
+	io_wait();
+	outb(PIC1_DATA, offset1);                 // ICW2: Master PIC vector offset
+	io_wait();
+	outb(PIC2_DATA, offset2);                 // ICW2: Slave PIC vector offset
+	io_wait();
+	outb(PIC1_DATA, 4);                       // ICW3: tell Master PIC that there is a slave PIC at IRQ2 (0000 0100)
+	io_wait();
+	outb(PIC2_DATA, 2);                       // ICW3: tell Slave PIC its cascade identity (0000 0010)
+	io_wait();
+ 
+	outb(PIC1_DATA, ICW4_8086);               // ICW4: have the PICs use 8086 mode (and not 8080 mode)
+	io_wait();
+	outb(PIC2_DATA, ICW4_8086);
+	io_wait();
+ 
+	outb(PIC1_DATA, a1);   // restore saved masks.
+	outb(PIC2_DATA, a2);
+}
+
+uint8_t cmos_register_value(uint16_t register_number)
+{
+	outb(0x70, register_number);
+	return inb(0x71);
+}
+
+void display_date()
+{
+	uint8_t year = cmos_register_value(0x09);
+	uint8_t month = cmos_register_value(0x08);
+	uint8_t day = cmos_register_value(0x07);
+	uint8_t hours = cmos_register_value(0x04);
+	uint8_t minutes = cmos_register_value(0x02);
+	uint8_t seconds = cmos_register_value(0x00);
+
+	terminal_writenumpad(year, 10, 2);
+	terminal_writestring("-");
+	terminal_writenumpad(month, 10, 2);
+	terminal_writestring("-");
+	terminal_writenumpad(day, 10, 2);
+	terminal_writestring(" ");
+	terminal_writenumpad(hours, 10, 2);
+	terminal_writestring(":");
+	terminal_writenumpad(minutes, 10, 2);
+	terminal_writestring(":");
+	terminal_writenumpad(seconds, 10, 2);
 }
 
 void kernel_main(void)
@@ -434,4 +136,54 @@ void kernel_main(void)
 	terminal_initialize();
 	print_texts();
 	gdt_setup();
+	idt_setup();
+
+	PIC_remap(0x08, 0x70);
+
+	// Set RTC freq
+	uint8_t rate = 15;
+	rate &= 0x0F;
+	set_interrupts(false);
+	outb(0x70, 0x8A);
+	char prev = inb(0x71);
+	outb(0x70, 0x8A);
+	outb(0x71, (prev & 0xF0) | rate);
+	set_interrupts(true);
+
+	// Set up RTC periodic interrupts
+	set_interrupts(false);
+	outb(0x70, 0x8B);
+	prev = inb(0x71);
+	outb(0x70, 0x8B);
+	outb(0x71, prev | 0x44);	
+	set_interrupts(true);
+	// Change to binary date format ^^
+
+	// Clear IRQ 8 mask
+	//outb(0xA1, inb(0xA1) & ~(1 << 0));
+	outb(0xA1, ~(1 << 0));
+	outb(0x21, ~(1 << 2));
+
+	uint8_t slave_mask = inb(0xA1);
+	terminal_newline();
+	terminal_writestring("Slave mask: \n");
+	terminal_writenumpad(slave_mask, 2, 8);	
+
+	uint8_t master_mask = inb(0x21);
+	terminal_newline();
+	terminal_writestring("Master mask:\n");
+	terminal_writenumpad(master_mask, 2, 8);
+
+	outb(0x70, 0x0C);
+	unsigned short v = inb(0x71);
+	terminal_newline();
+	terminal_writenumpad(v, 16, 2);
+
+	terminal_newline();
+	terminal_writestring("PTR");
+	terminal_writenumpad((uintptr_t)&kernel_main, 16, 16);
+
+	terminal_newline();
+	display_date();
+	breakpoint();
 }
