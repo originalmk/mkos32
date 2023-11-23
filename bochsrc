@@ -7,3 +7,4 @@ ata1-master: type=disk, path="dysk.img", mode=flat
 boot: cdrom
 display_library: x, options="gui_debug"
 magic_break: enabled=1
+clock: sync=slowdown, time0=local
