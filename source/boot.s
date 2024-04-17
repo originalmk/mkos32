@@ -32,7 +32,7 @@
 .global stack_top
 .global stack_bottom
 stack_bottom:
-/* Stos o wielkości 16 KB */
+/* Stos o wielkości 64 KB */
 .skip 65536
 stack_top:
 
@@ -45,83 +45,55 @@ clock_pos: .int 0x0
 	Oznaczenie startu, tu zaczyna się kod kernela!
 */
 .section .text
-.global default_isr
-.type default_isr, @function
-default_isr:
-cli
-push %eax
-mov $0x0F41, %eax
-add int_count, %eax
-mov %ax, 0xb8000
 
-incl int_count
+.macro isr number
+.global isr_\number
+.type isr_\number, @function
+isr_\number :
+pusha
+push $\number
 
-cmpl $0x5, int_count
-jne end
+call isr_common_handler
 
-movl $0x0, int_count
+add $4, %esp
 
-end:
-xchg %bx, %bx
-
-mov $0x20, %al
-outb %al, $0x20
-
-mov $0x20, %al
-outb %al, $0xA0
-
-pop %eax
+popa
 sti
 iretl
+.endm
 
-.global clock_isr
-.type clock_isr, @function
-clock_isr:
-cli
-push %eax
-
-//xchg %bx, %bx
-
-mov $0x0F41, %ax
-add clock_count, %ax
-mov clock_pos, %edx
-shl $1, %edx
-add $0xb8002, %edx
-movw %ax, (%edx)
-
-incl clock_count
-
-cmpl $0x1F, clock_count
-jne end2
-
-movl $0x0, clock_count
-
-end2:
-
-incl clock_pos
-cmpl $0x7CF, clock_pos
-jne end3
-
-movl $0x0, clock_pos
-
-end3:
-
-//xchg %bx, %bx
-
-mov $0x0c, %al
-outb %al, $0x70
-inb $0x71
-
-mov $0x20, %al
-outb %al, $0x20
-
-mov $0x20, %al
-outb %al, $0xA0
-// EOI
-
-pop %eax
-sti
-iretl
+isr 0
+isr 1
+isr 2
+isr 3
+isr 4
+isr 5
+isr 6
+isr 7
+isr 8
+isr 9
+isr 10
+isr 11
+isr 12
+isr 13
+isr 14
+isr 15
+isr 16
+isr 17
+isr 18
+isr 19
+isr 20
+isr 21
+isr 22
+isr 23
+isr 24
+isr 25
+isr 26
+isr 27
+isr 28
+isr 29
+isr 30
+isr 31
 
 .global _start
 .type _start, @function

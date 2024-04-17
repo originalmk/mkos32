@@ -1,9 +1,4 @@
-#include <stddef.h>
-#include <stdint.h>
-
-#include "gdt.h"
-#include "print.h"
-#include "idt.h"
+#pragma once
 
 /* Taken from OSDEV WIKI */
 #define PIC1		0x20		/* IO base address for master PIC */
@@ -74,6 +69,13 @@ static inline void io_wait(void)
     outb(0x80, 0);
 }
 
+uint8_t cmos_register_value(uint16_t register_number)
+{
+	outb(0x70, register_number);
+	return inb(0x71);
+}
+
+
 void PIC_remap(int offset1, int offset2)
 {
 	unsigned char a1, a2;
@@ -103,12 +105,6 @@ void PIC_remap(int offset1, int offset2)
 	outb(PIC2_DATA, a2);
 }
 
-uint8_t cmos_register_value(uint16_t register_number)
-{
-	outb(0x70, register_number);
-	return inb(0x71);
-}
-
 void display_date()
 {
 	uint8_t year = cmos_register_value(0x09);
@@ -129,61 +125,5 @@ void display_date()
 	terminal_writenumpad(minutes, 10, 2);
 	terminal_writestring(":");
 	terminal_writenumpad(seconds, 10, 2);
-}
-
-void kernel_main(void)
-{
-	terminal_initialize();
-	print_texts();
-	gdt_setup();
-	idt_setup();
-
-	PIC_remap(0x08, 0x70);
-
-	// Set RTC freq
-	uint8_t rate = 15;
-	rate &= 0x0F;
-	set_interrupts(false);
-	outb(0x70, 0x8A);
-	char prev = inb(0x71);
-	outb(0x70, 0x8A);
-	outb(0x71, (prev & 0xF0) | rate);
-	set_interrupts(true);
-
-	// Set up RTC periodic interrupts
-	set_interrupts(false);
-	outb(0x70, 0x8B);
-	prev = inb(0x71);
-	outb(0x70, 0x8B);
-	outb(0x71, prev | 0x44);	
-	set_interrupts(true);
-	// Change to binary date format ^^
-
-	// Clear IRQ 8 mask
-	//outb(0xA1, inb(0xA1) & ~(1 << 0));
-	outb(0xA1, ~(1 << 0));
-	outb(0x21, ~(1 << 2));
-
-	uint8_t slave_mask = inb(0xA1);
 	terminal_newline();
-	terminal_writestring("Slave mask: \n");
-	terminal_writenumpad(slave_mask, 2, 8);	
-
-	uint8_t master_mask = inb(0x21);
-	terminal_newline();
-	terminal_writestring("Master mask:\n");
-	terminal_writenumpad(master_mask, 2, 8);
-
-	outb(0x70, 0x0C);
-	unsigned short v = inb(0x71);
-	terminal_newline();
-	terminal_writenumpad(v, 16, 2);
-
-	terminal_newline();
-	terminal_writestring("PTR");
-	terminal_writenumpad((uintptr_t)&kernel_main, 16, 16);
-
-	terminal_newline();
-	display_date();
-	breakpoint();
 }
