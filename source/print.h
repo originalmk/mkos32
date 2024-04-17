@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
+
+#define NORMAL_MODE 0
+#define FORMAT_MODE 1
 
 /*
  * Hardware text mode color constants. 
@@ -78,8 +82,23 @@ void terminal_putentryat(char c, uint8_t color, size_t x, size_t y)
 	terminal_buffer[index] = vga_entry(c, color);
 }
 
+void terminal_putchar(char);
+void terminal_newline()
+{
+	for (size_t x = terminal_column; x < VGA_WIDTH; x++)
+	{
+		terminal_putchar(' ');
+	}
+}
+
 void terminal_putchar(char c)
 {
+	if (c == '\n')
+	{
+		terminal_newline();
+		return;
+	}
+
 	terminal_putentryat(c, terminal_color, terminal_column, terminal_row);
 	if (++terminal_column == VGA_WIDTH)
 	{
@@ -127,26 +146,11 @@ void terminal_putchar(char c)
 	terminal_color = prevColor;
 }
 
-void terminal_newline()
-{
-	for (size_t x = terminal_column; x < VGA_WIDTH; x++)
-	{
-		terminal_putchar(' ');
-	}
-}
-
 void terminal_write(const char *data, size_t size)
 {
 	for (size_t i = 0; i < size; i++)
 	{
-		if (data[i] == '\n')
-		{
-			terminal_newline();
-		}
-		else
-		{
-			terminal_putchar(data[i]);
-		}
+		terminal_putchar(data[i]);
 	}
 }
 
@@ -257,3 +261,52 @@ void print_texts()
 	terminal_writestring(" MiB\n");
 }
 
+void printf(const char *format, ...)
+{
+	int current_mode = NORMAL_MODE;
+	va_list vl;
+	va_start(vl, format);
+
+	for (int i = 0; format[i] != '\0'; i++)
+	{
+		char current = format[i];
+		switch (current)
+		{
+			case '%':
+				if (current_mode == FORMAT_MODE)
+				{
+					current_mode = NORMAL_MODE;
+					terminal_putchar(current);
+				}
+				else if (current_mode == NORMAL_MODE)
+				{
+					current_mode = FORMAT_MODE;
+				}
+				break;
+			default:
+				if (current_mode == NORMAL_MODE)
+				{
+					terminal_putchar(current);
+				}
+				else if (current_mode == FORMAT_MODE)
+				{
+					// Print argument
+					switch (current)
+					{
+						case 's':
+							terminal_writestring(va_arg(vl, char*));
+							break;
+						case 'd':
+							terminal_writenum(va_arg(vl, int), 10);
+							break;
+						case 'x':
+							terminal_writenum(va_arg(vl, int), 16);
+					}
+					current_mode = NORMAL_MODE;
+				}
+				break;
+		}
+	}
+
+	va_end(vl);
+}
