@@ -1,6 +1,8 @@
 # 💾 MKOS32
 MKOS32 is very basic operating system, the only thing it can do is printing current date and time twice a second.
 
+![mkos running in bochs emulator](mkos32.png)
+
 ## Steps
 General list of steps which led me to the current state of project:
 1. Cross compilation, preparing gcc and bintuils to compile programs for my OS
