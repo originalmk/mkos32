@@ -1,8 +1,6 @@
-boot.o
-kernel.o
+build/
 isodir/
-mkos.bin
-mkos.iso
-bx_enh_dbg.ini
-dysk.img
+scripts/
+filesystem/
 .idea/
+notes/
